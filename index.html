@@ -563,11 +563,11 @@
 
         // Dimensions
         const width = 900;
-        const height = 700;
+        const height = 800;
         const centerX = width / 2;
         const centerY = height / 2;
         const defenseCircleRadius = 150;
-        const attackRadius = 300;
+        const attackRadius = 315;
 
         // Create SVG
         const svg = d3.select("#chart")
@@ -596,17 +596,67 @@
         });
 
         // Draw the main defense circle
-        g.append("circle")
-            .attr("cx", 0)
-            .attr("cy", 0)
-            .attr("r", defenseCircleRadius)
-            .style("fill", "none")
-            .style("stroke", "rgba(255, 255, 255, 0.2)")
-            .style("stroke-width", 2)
-            .style("opacity", 0)
-            .transition()
-            .duration(1000)
-            .style("opacity", 1);
+		// Draw the main defense circle
+		g.append("circle")
+			.attr("cx", 0)
+			.attr("cy", 0)
+			.attr("r", defenseCircleRadius)
+			.style("fill", "none")
+			.style("stroke", "rgba(255, 255, 255, 0.2)")
+			.style("stroke-width", 2)
+			.style("opacity", 0)
+			.transition()
+			.duration(1000)
+			.style("opacity", 1);
+
+		// Add pulsing shield rings (automatic transition)
+		const pulsingRings = g.append("g").attr("class", "pulsing-rings");
+
+		function createPulsingRing() {
+			pulsingRings.append("circle")
+				.attr("cx", 0)
+				.attr("cy", 0)
+				.attr("r", defenseCircleRadius)
+				.style("fill", "none")
+				.style("stroke", "#8338ec")
+				.style("stroke-width", 3)
+				.style("opacity", 0.8)
+				.transition()
+				.duration(2000)
+				.ease(d3.easeLinear)
+				.attr("r", defenseCircleRadius + 60)
+				.style("opacity", 0)
+				.style("stroke-width", 1)
+				.remove();
+		}
+
+		// Create pulsing rings continuously
+		setInterval(createPulsingRing, 2000);
+		createPulsingRing();
+
+		// Add rotating scanner beam (automatic transition)
+		const scannerBeam = g.append("line")
+			.attr("class", "scanner-beam")
+			.attr("x1", 0)
+			.attr("y1", 0)
+			.attr("x2", 0)
+			.attr("y2", -attackRadius - 50)
+			.style("stroke", "rgba(131, 56, 236, 0.4)")
+			.style("stroke-width", 2)
+			.style("filter", "drop-shadow(0 0 8px #8338ec)");
+
+		function rotateScannerBeam() {
+			scannerBeam
+				.transition()
+				.duration(4000)
+				.ease(d3.easeLinear)
+				.attrTween("transform", function() {
+					return d3.interpolateString("rotate(0)", "rotate(360)");
+				})
+				.on("end", rotateScannerBeam);
+		}
+
+		rotateScannerBeam();
 
         // Draw colored arc segments
         const arcs = g.selectAll(".defense-arc")
@@ -756,181 +806,243 @@
             .text("Overall Defense");
 
         // Functions
-        function selectDefense(defenseName) {
-            selectedDefense = defenseName === selectedDefense ? null : defenseName;
+		function resetToDefault() {
+            // Clear selections
+            selectedDefense = null;
             selectedAttack = null;
+            
+            // Clear all special visual effects
+            g.selectAll(".attack-line").remove();
+            g.selectAll(".value-label").remove();
+            g.selectAll(".penetration-indicator").remove();
+            
+            // Reset all arcs to default state
+            arcs.transition()
+                .duration(300)
+                .style("opacity", 1)
+                .style("fill", d => defenseColorScale(d.avg))
+                .style("filter", "drop-shadow(0 0 8px rgba(255, 255, 255, 0.3))");
+            
+            // Reset all attack nodes to default state
+            attackNodes.transition()
+                .duration(300)
+                .style("opacity", 0.8)
+                .style("filter", "none");
+            
+            // Reset center display
+            const overallAvg = d3.mean(defenseStats.map(d => d.avg));
+            centerScore.text(overallAvg.toFixed(1) + "%");
+            centerLabel.text("Overall Defense");
+        }
+
+        function selectDefense(defenseName) {
+            // If clicking the same defense, reset to default
+            if (selectedDefense === defenseName) {
+                resetToDefault();
+                updateInsights();
+                return;
+            }
+            
+            // Set new selection
+            selectedDefense = defenseName;
+            selectedAttack = null;
+            
+            // Apply new visualization
             updateVisualization();
             updateInsights();
         }
 
         function selectAttack(attackName) {
-            selectedAttack = attackName === selectedAttack ? null : attackName;
+            // If clicking the same attack, reset to default
+            if (selectedAttack === attackName) {
+                resetToDefault();
+                updateInsights();
+                return;
+            }
+            
+            // Set new selection
+            selectedAttack = attackName;
             selectedDefense = null;
+            
+            // Apply new visualization
             updateVisualization();
             updateInsights();
         }
 
-        function updateVisualization() {
-            arcs.transition()
-                .duration(500)
-                .style("opacity", d => {
-                    if (!selectedDefense && !selectedAttack) return 1;
-                    if (selectedDefense) return d.name === selectedDefense ? 1 : 0.3;
-                    if (selectedAttack) return 1;
-                    return 1;
-                })
-                .style("filter", d => {
-                    if (d.name === selectedDefense) return "drop-shadow(0 0 25px currentColor)";
-                    return "drop-shadow(0 0 8px rgba(255, 255, 255, 0.3))";
-                });
+		function updateVisualization() {
+			// First, always remove all temporary elements
+			g.selectAll(".attack-line").remove();
+			g.selectAll(".value-label").remove();
+			g.selectAll(".penetration-indicator").remove();
+			
+			// ALWAYS reset arcs to their default colors first (before any checks)
+			arcs.style("fill", d => defenseColorScale(d.avg));
+			
+			// If nothing is selected, reset everything to default
+			if (!selectedDefense && !selectedAttack) {
+				arcs.transition()
+					.duration(500)
+					.style("opacity", 1)
+					.style("filter", "drop-shadow(0 0 8px rgba(255, 255, 255, 0.3))");
+				
+				attackNodes.transition()
+					.duration(500)
+					.style("opacity", 0.8)
+					.style("filter", "none");
+				
+				const overallAvg = d3.mean(defenseStats.map(d => d.avg));
+				centerScore.text(overallAvg.toFixed(1) + "%");
+				centerLabel.text("Overall Defense");
+				return; // Exit early
+			}
+			
+			if (selectedDefense) {
+				// Apply defense selection styling
+				arcs.transition()
+					.duration(500)
+					.style("opacity", d => d.name === selectedDefense ? 1 : 0.3)
+					.style("filter", d => {
+						if (d.name === selectedDefense) return "drop-shadow(0 0 25px currentColor)";
+						return "drop-shadow(0 0 8px rgba(255, 255, 255, 0.3))";
+					});
 
-            g.selectAll(".attack-line").remove();
-            g.selectAll(".value-label").remove();
-            g.selectAll(".penetration-indicator").remove();
+				const defenseData = defenseStats.find(d => d.name === selectedDefense);
+				
+				const lineScale = d3.scaleLinear()
+					.domain([0, 100])
+					.range([0, attackRadius - defenseCircleRadius - 50]);
+				
+				const lines = defenseData.scores.map(s => {
+					const attackPos = attackPositions.find(a => a.attack === s.attack);
+					const angle = Math.atan2(attackPos.y, attackPos.x);
+					const lineLength = lineScale(s.value);
+					const startRadius = defenseCircleRadius + 20;
+					
+					return {
+						...s,
+						x1: Math.cos(angle) * startRadius,
+						y1: Math.sin(angle) * startRadius,
+						x2: Math.cos(angle) * (startRadius + lineLength),
+						y2: Math.sin(angle) * (startRadius + lineLength),
+						angle: angle,
+						color: defenseColorScale(s.value)
+					};
+				});
 
-            if (selectedDefense) {
-                const defenseData = defenseStats.find(d => d.name === selectedDefense);
-                
-                const lineScale = d3.scaleLinear()
-                    .domain([0, 100])
-                    .range([0, attackRadius - defenseCircleRadius - 50]);
-                
-                const lines = defenseData.scores.map(s => {
-                    const attackPos = attackPositions.find(a => a.attack === s.attack);
-                    const angle = Math.atan2(attackPos.y, attackPos.x);
-                    const lineLength = lineScale(s.value);
-                    const startRadius = defenseCircleRadius + 20;
-                    
-                    return {
-                        ...s,
-                        x1: Math.cos(angle) * startRadius,
-                        y1: Math.sin(angle) * startRadius,
-                        x2: Math.cos(angle) * (startRadius + lineLength),
-                        y2: Math.sin(angle) * (startRadius + lineLength),
-                        angle: angle,
-                        color: defenseColorScale(s.value)
-                    };
-                });
+				const lineElements = g.selectAll(".attack-line")
+					.data(lines)
+					.enter()
+					.append("line")
+					.attr("class", "attack-line")
+					.attr("x1", d => d.x1)
+					.attr("y1", d => d.y1)
+					.attr("x2", d => d.x1)
+					.attr("y2", d => d.y1)
+					.style("stroke", d => d.color)
+					.style("stroke-width", d => Math.max(2, d.value / 20))
+					.style("opacity", 0.8);
 
-                const lineElements = g.selectAll(".attack-line")
-                    .data(lines)
-                    .enter()
-                    .append("line")
-                    .attr("class", "attack-line")
-                    .attr("x1", d => d.x1)
-                    .attr("y1", d => d.y1)
-                    .attr("x2", d => d.x1)
-                    .attr("y2", d => d.y1)
-                    .style("stroke", d => d.color)
-                    .style("stroke-width", d => Math.max(2, d.value / 20))
-                    .style("opacity", 0.8);
+				lineElements.transition()
+					.duration(800)
+					.attr("x2", d => d.x2)
+					.attr("y2", d => d.y2);
 
-                lineElements.transition()
-                    .duration(800)
-                    .attr("x2", d => d.x2)
-                    .attr("y2", d => d.y2);
+				setTimeout(() => {
+					g.selectAll(".value-label")
+						.data(lines)
+						.enter()
+						.append("text")
+						.attr("class", "value-label")
+						.attr("x", d => d.x2)
+						.attr("y", d => d.y2)
+						.attr("dx", d => Math.cos(d.angle) * 12)
+						.attr("dy", d => Math.sin(d.angle) * 12 + 4)
+						.attr("text-anchor", "middle")
+						.text(d => d.value + "%")
+						.style("fill", d => d.color)
+						.style("opacity", 0)
+						.transition()
+						.duration(400)
+						.style("opacity", 1);
+				}, 800);
 
-                setTimeout(() => {
-                    g.selectAll(".value-label")
-                        .data(lines)
-                        .enter()
-                        .append("text")
-                        .attr("class", "value-label")
-                        .attr("x", d => d.x2)
-                        .attr("y", d => d.y2)
-                        .attr("dx", d => Math.cos(d.angle) * 12)
-                        .attr("dy", d => Math.sin(d.angle) * 12 + 4)
-                        .attr("text-anchor", "middle")
-                        .text(d => d.value.toFixed(0) + "%")
-                        .style("fill", d => d.color)
-                        .style("opacity", 0)
-                        .transition()
-                        .duration(400)
-                        .style("opacity", 1);
-                }, 800);
+				centerScore.text(defenseData.avg.toFixed(1) + "%");
+				centerLabel.text(selectedDefense + " Avg");
+				
+				// Reset attack nodes for defense view
+				attackNodes.transition()
+					.duration(500)
+					.style("opacity", 0.8)
+					.style("filter", "none");
+				
+			} else if (selectedAttack) {
+				const attackData = rawData.find(d => d.attack === selectedAttack);
+				
+				// Apply attack-specific styling with red/green colors
+				defenseStats.forEach(defStat => {
+					const value = attackData[defStat.name];
+					const isPenetrated = value < 50;
+					
+					const targetArc = arcs.filter(d => d.name === defStat.name);
+					targetArc.transition()
+						.duration(500)
+						.style("fill", isPenetrated ? "#ff006e" : "#06ffa5")
+						.style("opacity", isPenetrated ? 0.8 : 1)
+						.style("filter", isPenetrated ? "drop-shadow(0 0 15px #ff006e)" : "drop-shadow(0 0 10px #06ffa5)");
+					
+					const symbol = isPenetrated ? "✗" : "✓";
+					const color = isPenetrated ? "#ff006e" : "#06ffa5";
+					const radius = defenseCircleRadius + 65;
+					const labelAngle = defStat.angle - angleStep * 2;
+					
+					g.append("text")
+						.attr("class", "penetration-indicator")
+						.attr("x", Math.cos(labelAngle) * radius)
+						.attr("y", Math.sin(labelAngle) * radius)
+						.attr("text-anchor", "middle")
+						.attr("dy", "0.35em")
+						.text(symbol)
+						.style("font-size", "24px")
+						.style("font-weight", "bold")
+						.style("fill", color)
+						.style("opacity", 0)
+						.style("text-shadow", `0 0 10px ${color}`)
+						.transition()
+						.delay(200)
+						.duration(400)
+						.style("opacity", 1);
+					
+					g.append("text")
+						.attr("class", "penetration-indicator")
+						.attr("x", Math.cos(labelAngle) * (radius + 30))
+						.attr("y", Math.sin(labelAngle) * (radius + 30))
+						.attr("text-anchor", "middle")
+						.text(value.toFixed(0) + "%")
+						.style("font-size", "12px")
+						.style("font-weight", "bold")
+						.style("fill", color)
+						.style("opacity", 0)
+						.style("text-shadow", `0 0 5px ${color}`)
+						.transition()
+						.delay(400)
+						.duration(400)
+						.style("opacity", 1);
+				});
 
-                centerScore.text(defenseData.avg.toFixed(1) + "%");
-                centerLabel.text(selectedDefense + " Avg");
-                
-            } else if (selectedAttack) {
-                const attackData = rawData.find(d => d.attack === selectedAttack);
-                
-                defenseStats.forEach(defStat => {
-                    const value = attackData[defStat.name];
-                    const isPenetrated = value < 50;
-                    
-                    const targetArc = arcs.filter(d => d.name === defStat.name);
-                    targetArc.transition()
-                        .duration(500)
-                        .style("fill", isPenetrated ? "#ff006e" : "#06ffa5")
-                        .style("opacity", isPenetrated ? 0.8 : 1)
-                        .style("filter", isPenetrated ? "drop-shadow(0 0 15px #ff006e)" : "drop-shadow(0 0 10px #06ffa5)");
-                    
-                    const symbol = isPenetrated ? "✗" : "✓";
-                    const color = isPenetrated ? "#ff006e" : "#06ffa5";
-                    const radius = defenseCircleRadius + 65;
-                    const labelAngle = defStat.angle - angleStep * 2;
-                    
-                    g.append("text")
-                        .attr("class", "penetration-indicator")
-                        .attr("x", Math.cos(labelAngle) * radius)
-                        .attr("y", Math.sin(labelAngle) * radius)
-                        .attr("text-anchor", "middle")
-                        .attr("dy", "0.35em")
-                        .text(symbol)
-                        .style("font-size", "24px")
-                        .style("font-weight", "bold")
-                        .style("fill", color)
-                        .style("opacity", 0)
-                        .style("text-shadow", `0 0 10px ${color}`)
-                        .transition()
-                        .delay(200)
-                        .duration(400)
-                        .style("opacity", 1);
-                    
-                    g.append("text")
-                        .attr("class", "penetration-indicator")
-                        .attr("x", Math.cos(labelAngle) * (radius + 30))
-                        .attr("y", Math.sin(labelAngle) * (radius + 30))
-                        .attr("text-anchor", "middle")
-                        .text(value.toFixed(0) + "%")
-                        .style("font-size", "12px")
-                        .style("font-weight", "bold")
-                        .style("fill", color)
-                        .style("opacity", 0)
-                        .style("text-shadow", `0 0 5px ${color}`)
-                        .transition()
-                        .delay(400)
-                        .duration(400)
-                        .style("opacity", 1);
-                });
-
-                const breached = defenses.filter(def => attackData[def] < 50).length;
-                centerScore.text(breached + "/9");
-                centerLabel.text("Defenses Breached");
-            } else {
-                arcs.transition()
-                    .duration(500)
-                    .style("fill", d => defenseColorScale(d.avg))
-                    .style("filter", "drop-shadow(0 0 8px rgba(255, 255, 255, 0.3))");
-                
-                const overallAvg = d3.mean(defenseStats.map(d => d.avg));
-                centerScore.text(overallAvg.toFixed(1) + "%");
-                centerLabel.text("Overall Defense");
-            }
-
-            attackNodes.transition()
-                .duration(500)
-                .style("opacity", d => {
-                    if (!selectedDefense && !selectedAttack) return 0.8;
-                    if (selectedAttack) return d.attack === selectedAttack ? 1 : 0.2;
-                    return 0.8;
-                })
-                .style("filter", d => {
-                    if (d.attack === selectedAttack) return "drop-shadow(0 0 20px currentColor)";
-                    return "none";
-                });
-        }
+				const breached = defenses.filter(def => attackData[def] < 50).length;
+				centerScore.text(breached + "/9");
+				centerLabel.text("Defenses Breached");
+				
+				// Update attack nodes for attack view
+				attackNodes.transition()
+					.duration(500)
+					.style("opacity", d => d.attack === selectedAttack ? 1 : 0.2)
+					.style("filter", d => {
+						if (d.attack === selectedAttack) return "drop-shadow(0 0 20px currentColor)";
+						return "none";
+					});
+			}
+		}
 
         function showDefenseTooltip(event, d) {
             const vulnerabilities = d.scores.filter(s => s.value < 40).length;
@@ -1031,9 +1143,8 @@
                 dataGrid.style.display = 'none';
                 insightText.innerHTML = `
                     1. Click on any defense shield (colored arcs) or attack node (perimeter dots) to reveal the battle dynamics.<br><br>
-					2. Click on it again to reset it to the default settings.<br><br>
-					3. Click on Reset All to restore the Default settings. <br><br>
-                    4. Click on Full Data Matrix on top Menu to explore specific battles. 			
+                    2. Click on Full Data Matrix on top Menu to explore specific battles.<br><br>			
+					3. Click on Reset All to restore the Default settings. 
                 `;
             }
         }
@@ -1092,6 +1203,10 @@
         });
 
         document.getElementById('matrixMode').addEventListener('click', function() {
+		    g.selectAll(".attack-line").remove()
+			g.selectAll(".value-label").remove()
+			g.selectAll(".penetration-indicator").remove()
+			arcs.style("fill", d => defenseColorScale(d.avg))
             document.querySelectorAll('.mode-toggle .btn').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             document.getElementById('matrixContainer').style.display = 'block';
@@ -1139,6 +1254,10 @@
                     cell.style.fontWeight = 'bold';
                     
 					cell.onclick = () => {
+					    g.selectAll(".attack-line").remove()
+						g.selectAll(".value-label").remove()
+						g.selectAll(".penetration-indicator").remove()
+						arcs.style("fill", d => defenseColorScale(d.avg));
                         selectedAttack = attack.attack;
                         selectedDefense = def;
                         
